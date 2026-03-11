@@ -1,0 +1,20 @@
+Assembly failed due to errors:
+line 4 : Error: Duplicate label found
+
+line 5 : Error: No such label present!
+
+line 6 : Error: Operand not correct
+
+line 7 : Error: Missing operand
+
+line 8 : Error: Unexpected operand present
+
+line 9 : Error: Extra operand present
+Error: Operand not correct
+
+line 10 : Error: Label naming rules violated
+
+line 11 : Error: Mnemonic is wrong
+
+line 12 : Error: Mnemonic is wrong
+
