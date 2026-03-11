@@ -49,13 +49,20 @@ Instructions may have either no operand or a single operand.
 
 ---
 
-## Repository Structure
 
-Assembler.cpp      -> Two-pass assembler implementation
-Emulator.cpp       -> SIMPLEX emulator implementation
-sample.asm         -> Sample valid assembly program
-test.asm           -> Program for testing error handling
-bubblesort.asm     -> Bubble sort program written in SIMPLEX assembly
+## Project Structure
+
+simplex-assembler-emulator-cpp
+│
+├── assembler/       -> Source code for the two-pass assembler
+├── emulator/        -> Source code for the SIMPLEX emulator
+├── programs/        -> Sample assembly programs
+│   ├── sample.asm   -> Example SIMPLEX assembly program
+│   └── bubblesort.asm -> Bubble sort implementation in SIMPLEX assembly
+├── output/          -> Generated object and listing files
+├── docs/            -> Project documentation
+└── README.md        -> Project description
+
 
 ---
 
