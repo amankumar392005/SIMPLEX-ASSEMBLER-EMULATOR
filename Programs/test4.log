@@ -10,7 +10,6 @@ line 7 : Error: Missing operand
 line 8 : Error: Unexpected operand present
 
 line 9 : Error: Extra operand present
-Error: Operand not correct
 
 line 10 : Error: Label naming rules violated
 
