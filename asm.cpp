@@ -1,260 +1,262 @@
 #include <bits/stdc++.h>
 using namespace std;
 
-map<string,pair<int,int>> opcode;
-map<string,int> labels;
-map<int,string> errors;
+// Map of mnemonics to opcode and number of operands
+map<string, pair<int, int>> opcodeMap;
 
-string trim(string s){
-    int l=0,r=s.size()-1;
-    while(l<=r && isspace(s[l])) l++;
-    while(r>=l && isspace(s[r])) r--;
-    if(l>r) return "";
-    return s.substr(l,r-l+1);
-}
+// Map for labels defined using SET instruction
+map<string, int> setLabels;
 
-string toHex(int x){
-    stringstream ss;
-    ss<<hex<<setw(8)<<setfill('0')<<x;
-    string s=ss.str();
-    if(s.size()>8) s=s.substr(s.size()-8);
-    return s;
-}
+// Function declarations
+void setupOpcodeMap(map<string, pair<int, int>> &opcodeMap);
+void trim(string &s);
+int convertToBase(string &num, int start, int base);
+string intToHex(int n);
+string encodeInstruction(const pair<int, int> &p);
+void fetchOperand(string &operand, int &arg, map<string, int> &labels, int op, int pc);
+void extractInstructionsAndLabels(map<int, pair<string, string>> &instr, fstream &file, map<string, int> &labels, map<int, string> &errors, int &pc, int &lineNo, map<int, int> &pcToLine);
 
-void initOpcode(){
-
-    opcode["ldc"]={0,1};
-    opcode["adc"]={1,1};
-    opcode["ldl"]={2,1};
-    opcode["stl"]={3,1};
-    opcode["ldnl"]={4,1};
-    opcode["stnl"]={5,1};
-    opcode["add"]={6,0};
-    opcode["sub"]={7,0};
-    opcode["shl"]={8,0};
-    opcode["shr"]={9,0};
-    opcode["adj"]={10,1};
-    opcode["a2sp"]={11,0};
-    opcode["sp2a"]={12,0};
-    opcode["call"]={13,1};
-    opcode["return"]={14,0};
-    opcode["brz"]={15,1};
-    opcode["brlz"]={16,1};
-    opcode["br"]={17,1};
-    opcode["data"] = {-1, 1};
-    opcode["HALT"]={18,0};
-}
-
-bool validLabel(string s){
-
-    if(s=="" || !isalpha(s[0])) return false;
-
-    for(char c:s)
-        if(!isalnum(c)) return false;
-
-    return true;
-}
-
-bool validNumber(string s){
-
-    if(s.size()>2 && s.substr(0,2)=="0x"){
-        for(int i=2;i<s.size();i++)
-            if(!isxdigit(s[i])) return false;
-        return true;
-    }
-
-    if(s.size()>1 && s[0]=='0'){
-        for(int i=1;i<s.size();i++)
-            if(s[i]<'0'||s[i]>'7') return false;
-        return true;
-    }
-
-    for(char c:s)
-        if(!isdigit(c) && c!='+' && c!='-')
-            return false;
-
-    return true;
-}
-
-int main(int argc,char* argv[]){
-
-    if(argc!=2){
-        cout<<"Usage: ./asm file.asm\n";
+// ------------------- MAIN FUNCTION -------------------
+int main(int argc, char *argv[]) {
+    if (argc != 2) {
+        cout << "Usage: ./asm filename.asm\n";
         return 0;
     }
 
-    initOpcode();
+    string inputFile = argv[1];
+    fstream inFile(inputFile);
 
-    string file=argv[1];
-    ifstream fin(file);
+    map<int, pair<string, string>> instructions; // PC -> {mnemonic, operand}
+    vector<pair<int, int>> machineCode;          // final binary code
+    map<string, int> labels;                     // label -> PC
+    map<int, string> errors;                     // line -> error message
+    map<int, int> pcToLine;                      // PC -> line number
 
-    map<int,pair<string,string>> instr;
-    map<int,int> pctoline;
+    int line = 0, pc = 0;
 
-    string line;
-    int pc=0,ln=0;
+    // Initialize opcode mapping
+    setupOpcodeMap(opcodeMap);
 
-    /* PASS 1 */
+    // Step 1: Extract instructions and labels
+    extractInstructionsAndLabels(instructions, inFile, labels, errors, pc, line, pcToLine);
 
-    while(getline(fin,line)){
+    // Step 2: Validate operands
+    for (auto &entry : instructions) {
+        string operand = entry.second.second;
+        int ln = pcToLine[entry.first];
 
-        ln++;
+        // Check for comma in operand
+        if (any_of(operand.begin(), operand.end(), [](char c){ return c == ','; }))
+            errors[ln] += "Error: Extra operand detected\n";
 
-        int comment=line.find(';');
-        if(comment!=string::npos)
-            line=line.substr(0,comment);
-
-        line=trim(line);
-        if(line=="") continue;
-
-        pctoline[pc]=ln;
-
-        string label="";
-        int pos=line.find(':');
-
-        if(pos!=-1){
-
-            label=trim(line.substr(0,pos));
-
-            if(!validLabel(label))
-                errors[ln]+="Error: Label naming rules violated\n";
-
-            else if(labels.count(label))
-                errors[ln]+="Error: Duplicate label found\n";
-
-            else
-                labels[label]=pc;
-
-            line=line.substr(pos+1);
-        }
-
-        line=trim(line);
-        if(line=="") continue;
-
-        stringstream ss(line);
-
-        string mnem;
-        ss>>mnem;
-
-        string operand;
-        getline(ss,operand);
-        operand=trim(operand);
-
-        if(!opcode.count(mnem)){
-            errors[ln]+="Error: Mnemonic is wrong\n";
-            continue;
-        }
-
-        if(opcode[mnem].second && operand=="")
-            errors[ln]+="Error: Missing operand\n";
-
-        if(!opcode[mnem].second && operand!="")
-            errors[ln]+="Error: Unexpected operand present\n";
-
-        instr[pc]={mnem,operand};
-        pc++;
-    }
-
-    /* PASS 2 : operand validation */
-
-    for(auto &i:instr){
-
-        int lineNo=pctoline[i.first];
-        string operand=i.second.second;
-
-        if(operand=="") continue;
-
-        if(operand.find(',')!=string::npos){
-
-            errors[lineNo]+="Error: Extra operand present\n";
-
-            string first=trim(operand.substr(0,operand.find(',')));
-
-            if(!validNumber(first))
-                errors[lineNo]+="Error: Operand not correct\n";
-
-            continue;
-        }
-
-        if(isalpha(operand[0])){
-
-            if(!labels.count(operand))
-                errors[lineNo]+="Error: No such label present!\n";
-        }
-        else{
-
-            if(!validNumber(operand))
-                errors[lineNo]+="Error: Operand not correct\n";
+        // If operand is a label
+        if (isalpha(operand[0])) {
+            if (!labels.count(operand))
+                errors[ln] += "Error: Label not found\n";
+        } else { 
+            // Validate number format
+            if (operand.substr(0, 2) == "0x") {
+                for (size_t j = 2; j < operand.size(); j++) {
+                    char c = operand[j];
+                    if (!isalnum(c) || (c >= 'g' && c <= 'z') || (c >= 'G' && c <= 'Z')) {
+                        errors[ln] += "Error: Invalid hex operand\n";
+                        break;
+                    }
+                }
+            } else if (operand[0] == '0') {
+                for (size_t j = 1; j < operand.size(); j++)
+                    if (operand[j] < '0' || operand[j] > '7') {
+                        errors[ln] += "Error: Invalid octal operand\n";
+                        break;
+                    }
+            } else {
+                for (char c : operand)
+                    if (!isdigit(c) && c != '+' && c != '-') {
+                        errors[ln] += "Error: Invalid decimal operand\n";
+                        break;
+                    }
+            }
         }
     }
 
-    string base=file.substr(0,file.find('.'));
-    ofstream log(base+".log");
+    // Step 3: Convert instructions to machine code if no errors
+    if (errors.empty()) {
+        for (size_t i = 0; i < instructions.size(); i++) {
+            string mnemo = instructions[i].first;
+            string oprnd = instructions[i].second;
+            int opc = opcodeMap[mnemo].first;
+            int arg = 0;
 
-    if(!errors.empty()){
+            if (opcodeMap[mnemo].second)
+                fetchOperand(oprnd, arg, labels, opc, i);
 
-        log<<"Assembly failed due to errors:\n";
+            if (mnemo == "data") {
+                opc = arg & 0xFF;
+                arg >>= 8;
+            }
 
-        for(auto &e:errors)
-            log<<"line "<<e.first<<" : "<<e.second<<"\n";
+            machineCode.push_back({arg, opc});
+        }
+    }
 
+    // Step 4: Generate log, object, and listing files
+    string baseName = inputFile.substr(0, inputFile.find('.'));
+    ofstream logFile(baseName + ".log");
+
+    if (!errors.empty()) {
+        logFile << "Assembly failed due to errors:\n";
+        for (auto &e : errors)
+            logFile << "line " << e.first << " : " << e.second;
+        logFile.close();
         return 0;
     }
 
-    log<<"Compiled successfully";
-    log.close();
+    logFile << "Compiled successfully\n";
+    logFile.close();
 
-    /* PASS 3 : machine code generation */
+    ofstream objFile(baseName + ".o", ios::out | ios::binary);
+    ofstream listFile(baseName + ".lst");
 
-    vector<pair<int,int>> code;
+    for (auto &code : machineCode)
+        objFile << encodeInstruction(code)<<endl;
 
-    for(int i=0;i<instr.size();i++){
+    for (size_t i = 0; i < machineCode.size(); i++) {
+        string pcStr = intToHex(i);
+        listFile << pcStr << " ";
 
-        string m=instr[i].first;
-        string o=instr[i].second;
-
-        int opc=opcode[m].first;
-        int arg=0;
-        if(m=="data"){
-             arg = stoi(o, nullptr, 0);
-             code.push_back({arg,0});
-            continue;
-        }
-        if(opcode[m].second){
-
-            if(isalpha(o[0]))
-                arg = labels[o];
-            else
-               arg = stoi(o, nullptr, 0);
-
-            /* PC relative instructions */
-            if(opc==13 || opc==15 || opc==16 || opc==17)
-                arg = arg - (i + 1);
+        for (auto &l : labels) {
+            if (l.second == i) {
+                listFile << "         " << l.first << ":\n" << pcStr << " ";
+                break;
+            }
         }
 
-        code.push_back({arg,opc});
+        listFile << encodeInstruction(machineCode[i]) << " "
+                 << instructions[i].first << " " << instructions[i].second << "\n";
     }
 
-    ofstream obj(base+".o");
-    ofstream lst(base+".lst");
+    objFile.close();
+    listFile.close();
 
-    for(auto &c:code)
-        obj<<toHex((c.first<<8)|c.second);
+    return 0;
+}
 
-    for(int i=0;i<code.size();i++){
+// ------------------- HELPER FUNCTIONS -------------------
 
-        string pc_hex=toHex(i);
+// Setup opcode map
+void setupOpcodeMap(map<string, pair<int, int>> &opcodeMap) {
+    opcodeMap["ldc"] = {0, 1}; opcodeMap["adc"] = {1, 1};
+    opcodeMap["ldl"] = {2, 1}; opcodeMap["stl"] = {3, 1};
+    opcodeMap["ldnl"] = {4, 1}; opcodeMap["stnl"] = {5, 1};
+    opcodeMap["add"] = {6, 0}; opcodeMap["sub"] = {7, 0};
+    opcodeMap["shl"] = {8, 0}; opcodeMap["shr"] = {9, 0};
+    opcodeMap["adj"] = {10, 1}; opcodeMap["a2sp"] = {11, 0};
+    opcodeMap["sp2a"] = {12, 0}; opcodeMap["call"] = {13, 1};
+    opcodeMap["return"] = {14, 0}; opcodeMap["brz"] = {15, 1};
+    opcodeMap["brlz"] = {16, 1}; opcodeMap["br"] = {17, 1};
+    opcodeMap["HALT"] = {18, 0}; opcodeMap["data"] = {-1, 1};
+    opcodeMap["SET"] = {-2, 1};
+}
 
-        lst<<pc_hex<<" ";
+// Trim spaces from both ends
+void trim(string &s) {
+    s = regex_replace(s, regex("^\\s+|\\s+$"), "");
+}
 
-        for(auto &l:labels)
-            if(l.second==i)
-                lst<<"        "<<l.first<<":\n"<<pc_hex<<" ";
+// Convert string number to integer of given base
+int convertToBase(string &num, int start, int base) {
+    if (base == 10) {
+        int sign = 1;
+        if (num[0] == '+' || num[0] == '-') start++;
+        if (num[0] == '-') sign = -1;
+        return sign * stoi(num.substr(start), 0, base);
+    }
+    return stoi(num, 0, base);
+}
 
-        lst<<toHex((code[i].first<<8)|code[i].second)<<" ";
-        lst<<instr[i].first<<" "<<instr[i].second<<"\n";
+// Convert integer to 8-char hex string
+string intToHex(int n) {
+    ostringstream oss;
+    oss << hex << setw(8) << setfill('0') << n;
+    string res = oss.str();
+    return res.size() > 8 ? res.substr(res.size() - 8) : res;
+}
+
+// Encode instruction into hex string
+string encodeInstruction(const pair<int, int> &p) {
+    int code = (p.first << 8) | p.second;
+    return intToHex(code);
+}
+
+// Fetch operand value
+void fetchOperand(string &operand, int &arg, map<string, int> &labels, int op, int pc) {
+    if (isalpha(operand[0])) {
+        if (setLabels.count(operand))
+            arg = setLabels[operand];
+        else
+            arg = labels[operand];
+    } else if (operand.substr(0, 2) == "0x") {
+        arg = convertToBase(operand, 2, 16);
+    } else if (operand[0] == '0') {
+        arg = convertToBase(operand, 1, 8);
+    } else {
+        arg = convertToBase(operand, 0, 10);
     }
 
-    obj.close();
-    lst.close();
+    if (op == 13 || op == 15 || op == 16 || op == 17)
+        arg -= (pc + 1);
+}
+
+// Extract instructions and labels from file
+void extractInstructionsAndLabels(map<int, pair<string, string>> &instr, fstream &file, map<string, int> &labels, map<int, string> &errors, int &pc, int &lineNo, map<int, int> &pcToLine) {
+    string lineStr;
+    while (getline(file, lineStr)) {
+        lineNo++;
+        lineStr = regex_replace(lineStr, regex(";.*$"), "");
+        trim(lineStr);
+        if (lineStr.empty()) continue;
+
+        pcToLine[pc] = lineNo;
+        size_t colonPos = lineStr.find(':');
+        string lbl;
+        if (colonPos != string::npos) {
+            lbl = lineStr.substr(0, colonPos);
+            trim(lbl);
+
+            if (lbl.empty()) errors[lineNo] += "Error: Empty label\n";
+            else if (!isalpha(lbl[0]) || find_if(lbl.begin(), lbl.end(), [](char c){ return !isalnum(c); }) != lbl.end())
+                errors[lineNo] += "Error: Invalid label\n";
+            else if (labels.count(lbl)) errors[lineNo] += "Error: Duplicate label\n";
+            else labels[lbl] = pc;
+
+            lineStr = lineStr.substr(colonPos + 1);
+            trim(lineStr);
+        }
+
+        if (lineStr.empty()) continue;
+
+        size_t spacePos = lineStr.find(' ');
+        string mnemonic = lineStr.substr(0, spacePos);
+        string operand = spacePos == string::npos ? "" : lineStr.substr(spacePos + 1);
+        trim(mnemonic);
+        trim(operand);
+
+        if (opcodeMap.find(mnemonic) == opcodeMap.end())
+            errors[lineNo] += "Error: Unknown mnemonic\n";
+        else if (opcodeMap[mnemonic].second == 1 && operand.empty())
+            errors[lineNo] += "Error: Operand missing\n";
+        else if (opcodeMap[mnemonic].second == 0 && !operand.empty())
+            errors[lineNo] += "Error: Unexpected operand\n";
+
+        if (mnemonic == "SET") {
+            if (lbl.empty()) errors[lineNo] += "Error: SET without label\n";
+            else {
+                int val;
+                fetchOperand(operand, val, labels, -1, pc);
+                setLabels[lbl] = val;
+            }
+        } else {
+            instr[pc++] = {mnemonic, operand};
+        }
+    }
 }

@@ -1,7 +1,7 @@
 ; test2.asm
 ; Test error handling
 label:
-label: ; duplicate label definition
+label: ; duplicate label definiton
 br nonesuch ; no such label
 ldc 08ge ; not a number
 ldc ; missing operand

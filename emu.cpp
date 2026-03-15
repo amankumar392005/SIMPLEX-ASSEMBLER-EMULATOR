@@ -1,260 +1,192 @@
 #include <bits/stdc++.h>
 using namespace std;
 
-map<string,pair<int,int>> opcode;
-map<string,int> labels, SETlabels;
-map<int,string> errors;
+// Map to convert opcode to mnemonic
+map<int, string> opcodeMap;
 
-string trim(string s){
-    int l=0,r=s.size()-1;
-    while(l<=r && isspace(s[l])) l++;
-    while(r>=l && isspace(s[r])) r--;
-    if(l>r) return "";
-    return s.substr(l,r-l+1);
+// Memory and registers
+int mem[10000], regA = 0, regB = 0, PC = 0, SP = 9999;
+
+// Populate opcode -> mnemonic mapping
+void initOpcodeMap() {
+    opcodeMap[0] = "ldc"; opcodeMap[1] = "adc"; opcodeMap[2] = "ldl"; opcodeMap[3] = "stl";
+    opcodeMap[4] = "ldnl"; opcodeMap[5] = "stnl"; opcodeMap[6] = "add"; opcodeMap[7] = "sub";
+    opcodeMap[8] = "shl"; opcodeMap[9] = "shr"; opcodeMap[10] = "adj"; opcodeMap[11] = "a2sp";
+    opcodeMap[12] = "sp2a"; opcodeMap[13] = "call"; opcodeMap[14] = "return"; opcodeMap[15] = "brz";
+    opcodeMap[16] = "brlz"; opcodeMap[17] = "br"; opcodeMap[18] = "HALT";
+    opcodeMap[-1] = "data"; opcodeMap[-2] = "SET";
 }
 
-string toHex(int x){
-    stringstream ss;
-    ss<<hex<<setw(8)<<setfill('0')<<x;
-    string s=ss.str();
-    if(s.size()>8) s=s.substr(s.size()-8);
-    return s;
+// Convert string number of any base to integer
+int convertBase(string &num, int start, int base) {
+    if (base == 10) {
+        int sign = 1;
+        if (num[0] == '+' || num[0] == '-') start++;
+        if (num[0] == '-') sign = -1;
+        return sign * stoi(num.substr(start), 0, base);
+    }
+    return stoi(num, 0, base);
 }
 
-void initOpcode(){
-
-    opcode["ldc"]={0,1};
-    opcode["adc"]={1,1};
-    opcode["ldl"]={2,1};
-    opcode["stl"]={3,1};
-    opcode["ldnl"]={4,1};
-    opcode["stnl"]={5,1};
-    opcode["add"]={6,0};
-    opcode["sub"]={7,0};
-    opcode["shl"]={8,0};
-    opcode["shr"]={9,0};
-    opcode["adj"]={10,1};
-    opcode["a2sp"]={11,0};
-    opcode["sp2a"]={12,0};
-    opcode["call"]={13,1};
-    opcode["return"]={14,0};
-    opcode["brz"]={15,1};
-    opcode["brlz"]={16,1};
-    opcode["br"]={17,1};
-    opcode["HALT"]={18,0};
-    opcode["data"]={-1,1};
-    opcode["SET"]={-2,1};
+// Convert integer to 8-character hex string
+string toHex(int n) {
+    ostringstream oss;
+    oss << hex << setw(8) << setfill('0') << n;
+    string res = oss.str();
+    return res.size() > 8 ? res.substr(res.size() - 8) : res;
 }
 
-bool validLabel(string s){
-
-    if(s=="" || !isalpha(s[0])) return false;
-
-    for(char c:s)
-        if(!isalnum(c)) return false;
-
-    return true;
+// Dump memory contents to console and trace file
+void memoryDump(ofstream &traceFile, int size) {
+    cout << "\n\t\tMemory Dump\t\t\n";
+    traceFile << "\n\t\tMemory Dump\t\t\n";
+    for (int i = 0; i < size; i++) {
+        if (i % 4) {
+            cout << toHex(mem[i]) << " "; traceFile << toHex(mem[i]) << " ";
+        } else {
+            cout << "\n" << toHex(i) << "\t" << toHex(mem[i]) << " ";
+            traceFile << "\n" << toHex(i) << "\t" << toHex(mem[i]) << " ";
+        }
+    }
+    cout << endl;
 }
 
-bool validOperand(string s){
+// Trace program execution
+void runTrace(ofstream &traceFile, int pcStart) {
+    cout << "\n\t\t---Tracing Instructions---\t\t\n\n";
+    traceFile << "\n\t\t---Tracing Instructions---\t\t\n\n";
 
-    if(s=="") return false;
+    set<int> pcOffsetOpcodes{13, 15, 16, 17};
+    bool halt = false;
+    int instrCount = 0;
 
-    if(isalpha(s[0])) return true;
+    while (true) {
+        int instr = mem[PC];
+        int maxHex = 0xffffffff, maxOp = 0xff;
 
-    if(s.size()>2 && s.substr(0,2)=="0x"){
-        for(int i=2;i<s.size();i++)
-            if(!isxdigit(s[i])) return false;
-        return true;
+        int opcodeByte = instr & 0xff;
+        string hexStr = toHex(opcodeByte).substr(6, 2);
+        int opCode = stoi(hexStr, nullptr, 16);
+        if (hexStr[0] >= '8') opCode = -(0xff - opCode + 1);
+
+        int operand = instr & 0xffffff00;
+        if (operand & (1 << 31)) operand = -(maxHex - operand + 1);
+        operand >>= 8;
+
+        if (opcodeMap.count(opCode)) {
+            cout << "PC: " << toHex(PC) << "\tSP: " << toHex(SP)
+                 << "\tA: " << toHex(regA) << "\tB: " << toHex(regB)
+                 << "\t" << opcodeMap[opCode] << " " << operand << "\n\n";
+
+            traceFile << "PC: " << toHex(PC) << "\tSP: " << toHex(SP)
+                      << "\tA: " << toHex(regA) << "\tB: " << toHex(regB)
+                      << "\t" << opcodeMap[opCode] << " " << operand << "\n\n";
+        } else halt = true;
+
+        // Execute opcode
+        switch(opCode) {
+            case 0: regB = regA; regA = operand; break;
+            case 1: regA += operand; break;
+            case 2: regB = regA; regA = mem[SP + operand]; break;
+            case 3: mem[SP + operand] = regA; regA = regB; break;
+            case 4: regA = mem[regA + operand]; break;
+            case 5: mem[regA + operand] = regB; break;
+            case 6: regA += regB; break;
+            case 7: regA = regB - regA; break;
+            case 8: regA = regB << regA; break;
+            case 9: regA = regB >> regA; break;
+            case 10: SP += operand; break;
+            case 11: SP = regA; regA = regB; break;
+            case 12: regB = regA; regA = SP; break;
+            case 13: regB = regA; regA = PC; PC += operand; break;
+            case 14: if (PC == regA && regA == regB) halt = true; PC = regA; regA = regB; break;
+            case 15: if (regA == 0) PC += operand; break;
+            case 16: if (regA < 0) PC += operand; break;
+            case 17: PC += operand; break;
+            case 18: halt = true; break;
+        }
+
+        if (SP >= 10000) { cout << "SP exceeded memory at PC: " << PC << endl; halt = true; }
+        if (pcOffsetOpcodes.count(opCode) && operand == -1) { cout << "Infinite loop detected\n"; halt = true; }
+
+        if (halt) break;
+        PC++; instrCount++;
     }
 
-    if(s[0]=='0' && s.size()>1){
-        for(int i=1;i<s.size();i++)
-            if(s[i]<'0'||s[i]>'7') return false;
-        return true;
-    }
-
-    for(char c:s)
-        if(!isdigit(c) && c!='+' && c!='-')
-            return false;
-
-    return true;
+    cout << instrCount << " instructions executed!\n";
 }
 
-int getValue(string s,int pc,int op){
-
-    int val;
-
-    if(isalpha(s[0])){
-        if(SETlabels.count(s)) val=SETlabels[s];
-        else val=labels[s];
-    }
-    else{
-        if(s.substr(0,2)=="0x") val=stoi(s,nullptr,16);
-        else if(s[0]=='0' && s.size()>1) val=stoi(s,nullptr,8);
-        else val=stoi(s);
-    }
-
-    if(op==13||op==15||op==16||op==17)
-        val -= (pc+1);
-
-    return val;
-}
-
-int main(int argc,char* argv[]){
-
-    if(argc!=2){
-        cout<<"Usage: ./asm file.asm\n";
+// -------------------- MAIN FUNCTION --------------------
+int main(int argc, char *argv[]) {
+    if (argc != 3) {
+        cout << "Usage: ./emu [option] file.o\n";
+        cout << "[option] -t : trace execution\n\t-b : memory dump before\n\t-a : memory dump after\n\t-I : display ISA\n";
         return 0;
     }
 
-    initOpcode();
+    initOpcodeMap();
 
-    string file=argv[1];
-    ifstream fin(file);
+    string mode = argv[1], inputFile = argv[2];
 
-    map<int,pair<string,string>> instr;
-    map<int,int> pctoline;
-
-    string line;
-    int pc=0, ln=0;
-
-    while(getline(fin,line)){
-
-        ln++;
-
-        int c=line.find(';');
-        if(c!=string::npos)
-            line=line.substr(0,c);
-
-        line=trim(line);
-        if(line=="") continue;
-
-        pctoline[pc]=ln;
-
-        string label="";
-        int pos=line.find(':');
-
-        if(pos!=-1){
-
-            label=trim(line.substr(0,pos));
-
-            if(!validLabel(label))
-                errors[ln]+="Error: Label naming rules violated\n";
-            else if(labels.count(label))
-                errors[ln]+="Error: Duplicate label found\n";
-            else
-                labels[label]=pc;
-
-            line=line.substr(pos+1);
-        }
-
-        line=trim(line);
-        if(line=="") continue;
-
-        stringstream ss(line);
-
-        string mnem,op;
-        ss>>mnem;
-        getline(ss,op);
-        op=trim(op);
-
-        if(!opcode.count(mnem)){
-            errors[ln]+="Error: Mnemonic is wrong\n";
-            continue;
-        }
-
-        if(opcode[mnem].second && op=="")
-            errors[ln]+="Error: Missing operand\n";
-
-        if(!opcode[mnem].second && op!="")
-            errors[ln]+="Error: Unexpected operand present\n";
-
-        if(op.find(',')!=string::npos){
-            errors[ln]+="Error: Extra operand present\n";
-            if(!validOperand(op))
-                errors[ln]+="Error: Operand not correct\n";
-        }
-
-        else if(op!=""){
-
-            if(isalpha(op[0])){
-                if(!labels.count(op))
-                    errors[ln]+="Error: No such label present!\n";
-            }
-            else{
-                if(!validOperand(op))
-                    errors[ln]+="Error: Operand not correct\n";
-            }
-        }
-
-        if(mnem=="SET"){
-            if(label!="")
-                SETlabels[label]=stoi(op);
-        }
-        else{
-            instr[pc]={mnem,op};
-            pc++;
-        }
+    int dotPos = inputFile.find('.');
+    if (dotPos == -1 || inputFile.substr(dotPos) != ".o") {
+        cout << "Invalid object file\n"; return 0;
     }
 
-    string base=file.substr(0,file.find('.'));
-    ofstream log(base+".log");
+    string traceFileName = inputFile.substr(0, dotPos) + ".trace";
+    ifstream inFile(inputFile); ofstream outFile(traceFileName);
 
-    if(!errors.empty()){
+    if (!inFile || !outFile) { cout << "Error opening files\n"; return 0; }
 
-        log<<"Assembly failed due to errors:\n";
+    string content; getline(inFile, content);
+    if (content.empty()) { cout << "File is empty\n"; return -1; }
 
-        for(auto &e:errors)
-            log<<"line "<<e.first<<" : "<<e.second<<"\n";
+    int maxOperand = stoi("ffffff", nullptr, 16), maxOpcode = stoi("ff", nullptr, 16);
+    int idx = 0, lineNo = 0;
 
-        return 0;
+    while (idx < content.length()) {
+        string hexStr = content.substr(idx, 8);
+        unsigned long val = stoul(hexStr, nullptr, 16);
+        int instr = static_cast<int>(val);
+
+        int opc = stoi(hexStr.substr(6, 2), nullptr, 16);
+        if (hexStr[6] >= '8') opc = -(maxOpcode - opc + 1);
+
+        int opr = stoi(hexStr.substr(0, 6), nullptr, 16);
+        if (hexStr[0] >= '8') opr = -(maxOperand - opr + 1);
+
+        mem[lineNo] = opc < 0 ? opr : instr;
+        idx += 8; lineNo++;
     }
 
-    log<<"Compiled successfully";
-    log.close();
-
-    vector<pair<int,int>> code;
-
-    for(int i=0;i<instr.size();i++){
-
-        string m=instr[i].first;
-        string o=instr[i].second;
-
-        int opc=opcode[m].first;
-        int arg=0;
-
-        if(opcode[m].second)
-            arg=getValue(o,i,opc);
-
-        if(m=="data"){
-            opc=arg & 255;
-            arg >>=8;
-        }
-
-        code.push_back({arg,opc});
+    if (mode[1] == 'I') {
+        cout << "Opcode  Mnemonic  Operand\n"
+             << "        data      value\n"
+             << "0       ldc       value\n"
+             << "1       adc       value\n"
+             << "2       ldl       value\n"
+             << "3       stl       value\n"
+             << "4       ldnl      value\n"
+             << "5       stnl      value\n"
+             << "6       add\n"
+             << "7       sub\n"
+             << "8       shl\n"
+             << "9       shr\n"
+             << "10      adj       value\n"
+             << "11      a2sp\n"
+             << "12      sp2a\n"
+             << "13      call      offset\n"
+             << "14      return\n"
+             << "15      brz       offset\n"
+             << "16      brlz      offset\n"
+             << "17      br        offset\n"
+             << "18      HALT\n"
+             << "        SET       value\n";
     }
 
-    ofstream obj(base+".o",ios::binary);
-    ofstream lst(base+".lst");
+    if (mode[1] == 'b') memoryDump(outFile, lineNo);
+    if (mode[1] == 't') runTrace(outFile, PC);
+    if (mode[1] == 'a') { runTrace(outFile, PC); memoryDump(outFile, lineNo); }
 
-    for(auto &c:code)
-        obj<<toHex((c.first<<8)|c.second);
-
-    for(int i=0;i<code.size();i++){
-
-        string pc_hex=toHex(i);
-
-        lst<<pc_hex<<" ";
-
-        for(auto &l:labels)
-            if(l.second==i)
-                lst<<"        "<<l.first<<":\n"<<pc_hex<<" ";
-
-        lst<<toHex((code[i].first<<8)|code[i].second)<<" ";
-        lst<<instr[i].first<<" "<<instr[i].second<<"\n";
-    }
-
-    obj.close();
-    lst.close();
+    return 0;
 }

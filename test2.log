@@ -1,0 +1,11 @@
+Assembly failed due to errors:
+line 4 : Error: Duplicate label
+line 5 : Error: Label not found
+line 6 : Error: Invalid octal operand
+line 7 : Error: Operand missing
+line 8 : Error: Unexpected operand
+line 9 : Error: Extra operand detected
+Error: Invalid decimal operand
+line 10 : Error: Invalid label
+line 11 : Error: Unknown mnemonic
+line 12 : Error: Unknown mnemonic
